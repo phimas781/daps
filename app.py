@@ -1,11 +1,18 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import numpy as np
 from datetime import datetime
+import numpy as np
+import sys
+from sklearn.pipeline import Pipeline
 
-# Load the trained model
-model = joblib.load('gwamz_streams_predictor.pkl')
+# Custom model wrapper class must be defined BEFORE loading the model
+class CustomModelWrapper:
+    def __init__(self, model):
+        self.model = model
+        
+    def predict(self, X):
+        return self.model.predict(X)
 
 # Set up the app
 st.set_page_config(
@@ -20,6 +27,27 @@ st.markdown("""
 **Predict the streaming performance of Gwamz's upcoming songs**  
 This AI-powered tool analyzes historical patterns to forecast how well new releases will perform.
 """)
+
+# Load the model with error handling
+@st.cache_resource(show_spinner="Loading prediction model...")
+def load_model():
+    try:
+        # Load the wrapped model
+        loaded = joblib.load('gwamz_streams_predictor_v2.pkl')
+        # Extract the actual model from the wrapper
+        return loaded.model
+    except Exception as e:
+        st.error(f"""
+        **Model loading failed**: {str(e)}
+        
+        Possible solutions:
+        1. Make sure 'gwamz_streams_predictor_v2.pkl' is in the same directory
+        2. Check the file is not corrupted
+        3. Verify Python versions match between training and deployment
+        """)
+        st.stop()
+
+model = load_model()
 
 # Sample data for historical visualization
 HISTORICAL_DATA = [
@@ -79,61 +107,71 @@ if submit_button:
         'track_version': [track_version]
     })
     
-    # Make prediction
-    with st.spinner('Analyzing track performance...'):
-        predicted_streams = model.predict(input_data)[0]
-    
-    # Display results
-    st.success(f"## Predicted Streams: **{int(predicted_streams):,}**")
-    
-    # Performance insights
-    st.subheader("Performance Insights")
-    
-    if predicted_streams > 2000000:
-        st.markdown("🔥 **Excellent Potential!** This track is predicted to perform among Gwamz's top songs.")
-    elif predicted_streams > 1000000:
-        st.markdown("💪 **Strong Performance!** This track is expected to perform well above average.")
-    elif predicted_streams > 500000:
-        st.markdown("👍 **Good Potential!** This track should perform decently based on current parameters.")
-    else:
-        st.markdown("🤔 **Moderate Performance.** Consider optimizing release strategy or track features.")
-    
-    # Feature impact visualization
-    st.subheader("Key Factors Influencing Prediction")
-    factors = {
-        'Track Popularity': track_popularity,
-        'Release Date': release_date.strftime("%B %Y"),
-        'Track Version': track_version,
-        'Explicit Content': "Yes" if is_explicit else "No",
-        'Album Position': f"Track {track_number} of {total_tracks_in_album}",
-        'Available Markets': available_markets_count
-    }
-    
-    factor_df = pd.DataFrame.from_dict(factors, orient='index', columns=['Value'])
-    st.dataframe(factor_df, use_container_width=True)
-    
-    # Optimization tips
-    st.subheader("Optimization Suggestions")
-    suggestions = []
-    
-    if track_version != "original":
-        suggestions.append("Consider releasing an **original version** first")
-    
-    if release_date.weekday() != 4:  # Not Friday
-        suggestions.append("Switch to **Friday release** for better performance")
-    
-    if available_markets_count < 180:
-        suggestions.append("Increase **available markets** to at least 180")
-    
-    if track_popularity < 40:
-        suggestions.append("Boost **track popularity** through pre-release marketing")
-    
-    if suggestions:
-        st.markdown("To improve predicted streams:")
-        for suggestion in suggestions:
-            st.markdown(f"- {suggestion}")
-    else:
-        st.markdown("✅ Your track parameters are well optimized!")
+    # Make prediction with error handling
+    try:
+        with st.spinner('Analyzing track performance...'):
+            predicted_streams = model.predict(input_data)[0]
+        
+        # Display results
+        st.success(f"## Predicted Streams: **{int(predicted_streams):,}**")
+        
+        # Performance insights
+        st.subheader("Performance Insights")
+        
+        if predicted_streams > 2000000:
+            st.markdown("🔥 **Excellent Potential!** This track is predicted to perform among Gwamz's top songs.")
+        elif predicted_streams > 1000000:
+            st.markdown("💪 **Strong Performance!** This track is expected to perform well above average.")
+        elif predicted_streams > 500000:
+            st.markdown("👍 **Good Potential!** This track should perform decently based on current parameters.")
+        else:
+            st.markdown("🤔 **Moderate Performance.** Consider optimizing release strategy or track features.")
+        
+        # Feature impact visualization
+        st.subheader("Key Factors Influencing Prediction")
+        factors = {
+            'Track Popularity': track_popularity,
+            'Release Date': release_date.strftime("%B %Y"),
+            'Track Version': track_version,
+            'Explicit Content': "Yes" if is_explicit else "No",
+            'Album Position': f"Track {track_number} of {total_tracks_in_album}",
+            'Available Markets': available_markets_count
+        }
+        
+        factor_df = pd.DataFrame.from_dict(factors, orient='index', columns=['Value'])
+        st.dataframe(factor_df, use_container_width=True)
+        
+        # Optimization tips
+        st.subheader("Optimization Suggestions")
+        suggestions = []
+        
+        if track_version != "original":
+            suggestions.append("Consider releasing an **original version** first")
+        
+        if release_date.weekday() != 4:  # Not Friday
+            suggestions.append("Switch to **Friday release** for better performance")
+        
+        if available_markets_count < 180:
+            suggestions.append("Increase **available markets** to at least 180")
+        
+        if track_popularity < 40:
+            suggestions.append("Boost **track popularity** through pre-release marketing")
+        
+        if suggestions:
+            st.markdown("To improve predicted streams:")
+            for suggestion in suggestions:
+                st.markdown(f"- {suggestion}")
+        else:
+            st.markdown("✅ Your track parameters are well optimized!")
+
+    except Exception as e:
+        st.error(f"Prediction failed: {str(e)}")
+        st.markdown("""
+        **Common fixes:**
+        - Verify all input fields are filled correctly
+        - Check the model supports all selected options
+        - Ensure the model file is not corrupted
+        """)
 
 # Historical performance section
 st.markdown("---")
@@ -171,6 +209,15 @@ Based on historical data analysis:
 - **Friday releases** perform 42% better than mid-week releases
 """)
 
+# System information (hidden by default)
+with st.expander("System Information", expanded=False):
+    st.write(f"Python version: {sys.version}")
+    st.write(f"Streamlit version: {st.__version__}")
+    try:
+        st.write(f"Model type: {type(model).__name__}")
+    except:
+        st.write("Model information unavailable")
+
 # Footer
 st.markdown("---")
-st.caption("Gwamz Song Performance Predictor v1.0 | Predictive Model Trained on Historical Streaming Data")
+st.caption("Gwamz Song Performance Predictor v2.0 | Predictive Model Trained on Historical Streaming Data")
